@@ -53,9 +53,16 @@
       background: #e7f3ff;
       padding: 20px;
       border-radius: 8px;
-      margin: 20px;
+      margin: 20px auto;
       text-align: center;
       border-left: 4px solid #667eea;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .centered {
+      margin: 0 auto;
     }
 
     .auth-section h3 {
@@ -357,11 +364,11 @@
     <!-- Authentication Section -->
     <div class="auth-section" id="authSection">
       <h3>Sign in with Google to track your progress</h3>
-      <div id="g_id_onload" data-client_id="917775460589-0sb14a7k4rmbdf319evuober7ck655b7.apps.googleusercontent.com"
-        data-context="signin" data-ux_mode="popup" data-callback="handleCredentialResponse" data-auto_prompt="false"
-        data-itp_support="true">
+      <div class="centered" id="g_id_onload"
+        data-client_id="917775460589-0sb14a7k4rmbdf319evuober7ck655b7.apps.googleusercontent.com" data-context="signin"
+        data-ux_mode="popup" data-callback="handleCredentialResponse" data-auto_prompt="false" data-itp_support="true">
       </div>
-      <div class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="outline"
+      <div class="g_id_signin centered" data-type="standard" data-shape="rectangular" data-theme="outline"
         data-text="signin_with" data-size="large" data-logo_alignment="left">
       </div>
       <p style="margin-top: 15px; font-size: 0.9rem; color: #6c757d;">
@@ -370,6 +377,7 @@
     </div>
 
     <!-- User Info Section -->
+
     <div class="user-info hidden" id="userInfo">
       <div class="user-details">
         <img id="userAvatar" class="user-avatar" src="" alt="User Avatar">
@@ -425,7 +433,7 @@
   <script>
     // Unified API Configuration
     const API_CONFIG = {
-      BASE_URL: 'https://script.google.com/macros/s/AKfycbyIGOKBefp1_mBMcULuQEcSgr-zoe-f1V7uhu4LusTqLn-2LIOdI4dudh2z-tatHxuzOQ/exec',
+      BASE_URL: 'https://script.google.com/macros/s/AKfycbzkG6oWwJx1vP0kzlqlX0-fB5RAELeX9SPHhAXYxl5yiP7vj2hmaTy9iWCKMU-NjZ3g0w/exec',
       API_KEY: 'sk_igcse_78bdf396ea4245c39865ad5ce78ca59c',
       SESSION_TIMEOUT: 60 * 60 * 1000 // 1 hour in milliseconds
     };
@@ -709,7 +717,7 @@
                     <div class="section-content">
                         ${chapter.topics.map(topic => `
                             <div class="topic-item">
-                                <input type="checkbox" class="topic-checkbox" id="topic_${chapter.number}_${topic.number}" onchange="updateProgress()">
+                                <input type="checkbox" class="topic-checkbox" id="topic_${chapter.number}_${topic.number}" onchange="handleTopicChange(this)">
                                 <label class="topic-label" for="topic_${chapter.number}_${topic.number}">${topic.number}. ${topic.name}</label>
                             </div>
                         `).join('')}
@@ -743,7 +751,7 @@
       }
     }
 
-    // Update progress calculation with weighted chapters
+    // Update progress calculation with weighted chapters and submit individual topic progress
     function updateProgress() {
       if (!currentUser) return;
 
@@ -790,6 +798,19 @@
 
       // Save progress to local storage
       saveUserProgress();
+    }
+
+    // Handle checkbox change with real-time submission
+    function handleTopicChange(checkbox) {
+      // Update UI immediately
+      updateProgress();
+
+      // Get topic ID from checkbox ID
+      const topicId = checkbox.id;
+      const isCompleted = checkbox.checked;
+
+      // Submit individual topic progress in real-time
+      submitTopicProgress(topicId, isCompleted);
     }
 
     // Save user progress to local storage
@@ -874,7 +895,45 @@
       handleScroll();
     }
 
-    // Submit progress to Google Apps Script using unified API
+    // Submit individual topic progress using GET request
+    async function submitTopicProgress(topicId, isCompleted) {
+      if (!currentUser) {
+        showStatus('Please sign in to submit progress.', 'error');
+        return;
+      }
+
+      try {
+        // Prepare data for GET request
+        const params = new URLSearchParams({
+          apiKey: API_CONFIG.API_KEY,
+          studentEmail: currentUser.email,
+          studentName: currentUser.name,
+          topicId: topicId,
+          isCompleted: isCompleted.toString(),
+          timestamp: Date.now().toString()
+        });
+
+        const url = `${API_CONFIG.BASE_URL}/update-topic?${params}`;
+        const response = await fetch(url, {
+          method: 'GET'
+          // No custom headers to avoid CORS preflight
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.error || 'Update failed');
+        }
+
+        // Show success status briefly
+        showStatus('Progress saved!', 'success');
+      } catch (error) {
+        console.error('Topic update error:', error);
+        // Don't show error for every checkbox change to avoid spam
+      }
+    }
+
+    // Submit overall progress summary using GET request
     async function submitProgress() {
       if (!currentUser) {
         showStatus('Please sign in to submit progress.', 'error');
@@ -897,33 +956,27 @@
       // Calculate progress
       const percentage = Math.round((completedTopics.length / allTopics.length) * 100);
 
-      // Prepare data for submission using unified API format
-      const submissionData = {
-        studentId: currentUser.id,
-        studentName: currentUser.name,
-        studentEmail: currentUser.email,
-        submissionDate: new Date().toISOString(),
-        progressPercentage: percentage,
-        completedTopics: completedTopics,
-        totalTopics: allTopics.length,
-        completedCount: completedTopics.length
-      };
-
       // Show loading state
       const submitBtn = document.getElementById('submitBtn');
       submitBtn.disabled = true;
       submitBtn.textContent = 'Submitting...';
 
       try {
-        const response = await fetch(API_CONFIG.BASE_URL + '/submit-progress', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': API_CONFIG.API_KEY,
-            'x-session-id': currentSessionId,
-            'x-user-email': currentUser.email
-          },
-          body: JSON.stringify(submissionData)
+        // Prepare data for GET request
+        const params = new URLSearchParams({
+          apiKey: API_CONFIG.API_KEY,
+          studentEmail: currentUser.email,
+          studentName: currentUser.name,
+          progressPercentage: percentage.toString(),
+          completedCount: completedTopics.length.toString(),
+          totalTopics: allTopics.length.toString(),
+          submissionDate: new Date().toISOString()
+        });
+
+        const url = `${API_CONFIG.BASE_URL}/submit-progress?${params}`;
+        const response = await fetch(url, {
+          method: 'GET'
+          // No custom headers to avoid CORS preflight
         });
 
         const result = await response.json();
